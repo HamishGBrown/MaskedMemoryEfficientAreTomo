@@ -46,8 +46,28 @@ static __device__ void mGCalcLocalShift
 	}
 }
 
+//-------------------------------------------------------------------
+// Cheap 32-bit integer hash (Wellons "triple32", public domain).
+// Replaces the previous next = (next * 19 + 57) % iSize LCG, whose
+// modulus (51^2) shares a factor with the multiplier step, so
+// adjacent seeds (adjacent pixels) produced offsets differing by a
+// near-constant step, i.e. a deterministic sawtooth ramp instead of
+// noise. Also fixes ix using "next % iSize" (a no-op, since next is
+// already reduced mod iSize) instead of "next % iWin", which made ix
+// land outside the 51x51 window almost every time and fall back to
+// repeating the boundary pixel.
+//-------------------------------------------------------------------
+static __device__ unsigned int mGHash(unsigned int x)
+{
+	x ^= x >> 17;  x *= 0xed5ad4bbu;
+	x ^= x >> 11;  x *= 0xac4c1b51u;
+	x ^= x >> 15;  x *= 0x31848babu;
+	x ^= x >> 14;
+	return x;
+}
+
 static __device__ float mGRandom
-(	int x, int y, 
+(	int x, int y,
 	int iInImgX,
 	float* gfInImg
 )
@@ -58,10 +78,10 @@ static __device__ float mGRandom
 	//-----------------------------------------------------------
 	int iWin = 51, ix = 0, iy = 0;
 	int iSize = iWin * iWin;
-	unsigned int next = y * giInSize[0] + x;
+	unsigned int seed = y * giInSize[0] + x;
 	for(int i=0; i<20; i++)
-	{	next = (next * 19 + 57) % iSize;
-		ix = (next % iSize) - iWin / 2 + x;
+	{	unsigned int next = mGHash(seed + i) % iSize;
+		ix = (next % iWin) - iWin / 2 + x;
 		if(ix < 0 || ix >= iInImgX) continue;
 		//-----------------------------------
 		iy = (next / iWin) - iWin / 2 + y;

@@ -147,6 +147,8 @@ public:
 	int GetPixels(void); // frame pixels
 	int GetNumFrames(void);
 	void Create(int* piStkSize);
+	void CreateStub(int* piStkSize); // sets dimensions without allocating frame data
+	bool IsStreaming(void) const;    // true when frames are NULL (volume written to file)
 	//-----------------
 	void SetFrame(int iFrame, float* pfFrame);
 	float* GetFrame(int iFrame);  // do not free

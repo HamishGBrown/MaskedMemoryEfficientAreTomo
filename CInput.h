@@ -17,6 +17,7 @@ public:
 	char m_acAlnFile[256];
 	char m_acAngFile[256];
 	char m_acRoiFile[256];
+	char m_acMaskFile[256];
 	char m_acTmpFile[256];
 	char m_acLogFile[256];
 	float m_afTiltRange[2];
@@ -41,6 +42,7 @@ public:
 	int m_aiNumPatches[2];
 	float m_afTiltScheme[3];
 	int m_aiCropVol[2];
+	int m_aiOutRoi[4];
 	int m_iOutXF;
 	int m_iAlign;
 	int m_iOutImod;
@@ -53,6 +55,7 @@ public:
 	char m_acAlnFileTag[32];
 	char m_acAngFileTag[32];
 	char m_acRoiFileTag[32];
+	char m_acMaskFileTag[32];
         char m_acTmpFileTag[32];
 	char m_acLogFileTag[32];
 	char m_acTiltRangeTag[32];
@@ -78,6 +81,7 @@ public:
 	char m_acOutXFTag[32];
 	char m_acAlignTag[32];
 	char m_acCropVolTag[32];
+	char m_acOutRoiTag[32];
 	char m_acOutImodTag[32];
 	char m_acDarkTolTag[32];
 	char m_acBFactorTag[32];

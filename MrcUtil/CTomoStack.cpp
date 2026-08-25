@@ -77,6 +77,38 @@ void CTomoStack::Create(int* piStkSize)
 	memset(m_piAcqIndices, 0, sizeof(float) * iSize);
 }
 
+void CTomoStack::CreateStub(int* piStkSize)
+{
+	this->Clean();
+	memcpy(m_aiStkSize, piStkSize, sizeof(int) * 3);
+	//-----------------
+	m_ppfFrames = new float*[m_aiStkSize[2]];
+	memset(m_ppfFrames, 0, sizeof(float*) * m_aiStkSize[2]);
+	//-----------------
+	m_ppfCenters = new float*[m_aiStkSize[2]];
+	for(int i=0; i<m_aiStkSize[2]; i++)
+	{	float* pfCent = new float[2];
+		pfCent[0] = 0.5f * m_aiStkSize[0];
+		pfCent[1] = 0.5f * m_aiStkSize[1];
+		m_ppfCenters[i] = pfCent;
+	}
+	//-----------------
+	m_pfTilts = new float[m_aiStkSize[2]];
+	memset(m_pfTilts, 0, sizeof(float) * m_aiStkSize[2]);
+	//-----------------
+	int iSize = m_aiStkSize[2] * 2;
+	m_piAcqIndices = new int[iSize];
+	m_piSecIndices = &m_piAcqIndices[m_aiStkSize[2]];
+	memset(m_piAcqIndices, 0, sizeof(int) * iSize);
+}
+
+bool CTomoStack::IsStreaming(void) const
+{
+	if(m_ppfFrames == 0L) return false;
+	if(m_aiStkSize[2] <= 0) return false;
+	return (m_ppfFrames[0] == 0L);
+}
+
 void CTomoStack::SetFrame(int iFrame, float* pfFrame)
 {
 	int iPixels = this->GetPixels();

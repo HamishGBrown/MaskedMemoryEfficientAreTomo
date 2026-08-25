@@ -10,6 +10,7 @@ CDoBaseRecon::CDoBaseRecon(void)
 	m_pfPadSinogram = 0L;
 	m_gfVolXZ = 0L;
 	m_pfVolXZ = 0L;
+	m_pfOutXZ = 0L;
 	m_iGpuID = -1;
 }
 
@@ -26,10 +27,12 @@ void CDoBaseRecon::Clean(void)
 	if(m_pfPadSinogram != 0L) cudaFreeHost(m_pfPadSinogram);
 	if(m_gfVolXZ != 0L) cudaFree(m_gfVolXZ);
 	if(m_pfVolXZ != 0L) cudaFreeHost(m_pfVolXZ);
+	if(m_pfOutXZ != 0L) cudaFreeHost(m_pfOutXZ);
 	m_gfPadSinogram = 0L;
 	m_pfPadSinogram = 0L;
 	m_gfVolXZ = 0L;
 	m_pfVolXZ = 0L;
+	m_pfOutXZ = 0L;
 }
 
 void CDoBaseRecon::Run(Util::CNextItem* pNextItem, int iGpuID)

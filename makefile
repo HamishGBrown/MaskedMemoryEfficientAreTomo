@@ -52,6 +52,7 @@ CUSRCS = ./Util/GAddImages.cu \
 	 ./CommonLine/GInterpolateLineSet.cu \
 	 ./ProjAlign/GReproj.cu \
 	 ./ProjAlign/GProjXcf.cu \
+	 ./ProjAlign/GMnccXcf.cu \
 	 ./DoseWeight/GDoseWeightImage.cu \
 	 ./Recon/GRWeight.cu \
 	 ./Recon/GBackProj.cu \

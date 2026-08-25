@@ -3,6 +3,8 @@
 #include "CFFTBuffer.h"
 #include "Util/CUtilInc.h"
 #include "MrcUtil/CMrcUtilInc.h"
+#include <unistd.h>
+#include <fcntl.h>
 #include "FindTilts/CFindTiltsInc.h"
 #include "StreAlign/CStreAlignInc.h"
 #include "ProjAlign/CProjAlignInc.h"
@@ -384,6 +386,11 @@ void CProcessThread::mCropVol(void)
 	if(pInput->m_aiCropVol[0] < 10) return;
 	if(pInput->m_aiCropVol[1] < 10) return;
 	if(m_pLocalParam == 0L) return;
+	if(m_pTomoStack->IsStreaming())
+	{	printf("Note: CropVol skipped — not supported when "
+		   "volume was streamed directly to disk.\n\n");
+		return;
+	}
 	//-----------------------------
 	MrcUtil::CCropVolume aCropVolume;
 	MrcUtil::CTomoStack* pCroppedVol = aCropVolume.DoIt(m_pTomoStack,
@@ -409,13 +416,15 @@ void CProcessThread::mSartRecon(int iVolZ)
 	if(iNumSubsets < 1) iNumSubsets = 1;
 	//----------------------------------
 	printf("Start SART reconstruction...\n");
+	float fPixelSize = pInput->m_fPixelSize * pInput->m_fOutBin;
 	Util_Time aTimer;
 	aTimer.Measure();
 	MrcUtil::CTomoStack* pVolStack = Recon::CDoSartRecon::DoIt
 	( m_pTomoStack, m_pAlignParam,
 	  iStartTilt, iNumTilts,
 	  iVolZ, pInput->m_aiSartParam[0], iNumSubsets,
-	  pInput->m_piGpuIDs, pInput->m_iNumGpus
+	  pInput->m_piGpuIDs, pInput->m_iNumGpus,
+	  pInput->m_acOutMrcFile, fPixelSize, pInput->m_aiOutRoi
 	);
 	printf("SART Recon: %.2f sec\n\n", aTimer.GetElapsedSeconds());
 	delete m_pTomoStack;
@@ -428,12 +437,14 @@ void CProcessThread::mWbpRecon(int iVolZ)
 	CInput* pInput = CInput::GetInstance();
 	float fRFactor = 6.0f - 4.0f * (pInput->m_fOutBin - 1) / 7.0f;
 	if(pInput->m_iWbp == 2) fRFactor = 2.0f;
+	float fPixelSize = pInput->m_fPixelSize * pInput->m_fOutBin;
 	//--------------------------------------
 	Util_Time aTimer;
 	aTimer.Measure();
 	MrcUtil::CTomoStack* pVolStack = Recon::CDoWbpRecon::DoIt
 	( m_pTomoStack, m_pAlignParam, iVolZ, fRFactor,
-	  pInput->m_piGpuIDs, pInput->m_iNumGpus
+	  pInput->m_piGpuIDs, pInput->m_iNumGpus,
+	  pInput->m_acOutMrcFile, fPixelSize, pInput->m_aiOutRoi
 	);
 	printf("WBP Recon: %.2f sec\n\n", aTimer.GetElapsedSeconds());
 	delete m_pTomoStack;
@@ -444,6 +455,7 @@ void CProcessThread::mFlipInt(void)
 {
 	CInput* pInput = CInput::GetInstance();
 	if(pInput->m_iFlipInt == 0) return;
+	if(m_pTomoStack->IsStreaming()) { mFlipIntStreaming(); return; }
 	MassNorm::CFlipInt3D aFlipInt;
 	aFlipInt.DoIt(m_pTomoStack);
 }
@@ -452,6 +464,7 @@ void CProcessThread::mSaveCentralSlices(void)
 {
 	CInput* pInput = CInput::GetInstance();
 	if(pInput->m_iVolZ <= 0) return;
+	if(m_pTomoStack->IsStreaming()) { mSaveCentralSlicesStreaming(); return; }
 	//------------------------------
 	MrcUtil::CGenCentralSlices aGenCentralSlices;
 	aGenCentralSlices.DoIt(m_pTomoStack);
@@ -478,6 +491,11 @@ void CProcessThread::mFlipVol(void)
 {
 	CInput* pInput = CInput::GetInstance();
 	if(pInput->m_iFlipVol == 0) return;
+	if(m_pTomoStack->IsStreaming())
+	{	printf("Note: FlipVol skipped — volume was streamed directly "
+		   "to disk in XZY order.\n\n");
+		return;
+	}
 	//-----------------
 	printf("Flip volume from xzy view to xyz view.\n");
 	int* piOldSize = m_pTomoStack->m_aiStkSize;
@@ -519,6 +537,10 @@ void CProcessThread::mSaveAlignment(void)
 void CProcessThread::mSaveStack(void)
 {
 	CInput* pInput = CInput::GetInstance();
+	// In streaming mode the volume was already written to disk with stats
+	// embedded in the MRC header; calling DoIt here would truncate the file.
+	if(m_pTomoStack->IsStreaming()) return;
+	//-----------------------------------------------
 	float* pfStats = new float[4];
 	MrcUtil::CCalcStackStats::DoIt(m_pTomoStack, pfStats,
 	   pInput->m_piGpuIDs, pInput->m_iNumGpus);
@@ -533,4 +555,107 @@ void CProcessThread::mSaveStack(void)
 	   fPixelSize, pfStats, bVolume);
 	//-------------------------------
 	if(pfStats != 0L) delete[] pfStats;
+}
+
+//-----------------------------------------------------------------------------
+// Two-pass intensity flip for streaming volumes (volume already on disk).
+// Pass 1: scan all slices to determine global min/max.
+// Pass 2: apply newVal = fMin + fMax - val and write each slice back.
+// The MRC header stats (amin, amax, amean) are updated in-place afterwards.
+// Using pread/pwrite is thread-safe and avoids loading the full volume.
+//-----------------------------------------------------------------------------
+void CProcessThread::mFlipIntStreaming(void)
+{
+	CInput* pInput = CInput::GetInstance();
+	int* piSize = m_pTomoStack->m_aiStkSize; // [volX, volZ, numY]
+	int iSlicePixels = piSize[0] * piSize[1];
+	size_t tSliceBytes = (size_t)iSlicePixels * sizeof(float);
+	// Data offset = 1024 B main header + 128*numY B ext-header stub.
+	size_t tDataOffset = 1024 + (size_t)32 * sizeof(float) * piSize[2];
+	//-------------------------------------------------------------------
+	printf("Flip volume intensity (streaming)...\n");
+	float* pfBuf = new float[iSlicePixels];
+	int iFd = open(pInput->m_acOutMrcFile, O_RDWR);
+	//-------------------------------------------------------------------
+	// Pass 1: global min/max.
+	float fMin = 1e30f, fMax = -1e30f;
+	for(int i=0; i<piSize[2]; i++)
+	{	off_t tOff = (off_t)tDataOffset + (off_t)i * tSliceBytes;
+		pread(iFd, pfBuf, tSliceBytes, tOff);
+		for(int j=0; j<iSlicePixels; j++)
+		{	if(pfBuf[j] < fMin) fMin = pfBuf[j];
+			if(pfBuf[j] > fMax) fMax = pfBuf[j];
+		}
+	}
+	//-------------------------------------------------------------------
+	// Pass 2: flip and write back; accumulate new mean.
+	double dMean = 0.0;
+	for(int i=0; i<piSize[2]; i++)
+	{	off_t tOff = (off_t)tDataOffset + (off_t)i * tSliceBytes;
+		pread(iFd, pfBuf, tSliceBytes, tOff);
+		for(int j=0; j<iSlicePixels; j++)
+		{	pfBuf[j] = fMin + fMax - pfBuf[j];
+			dMean += pfBuf[j];
+		}
+		pwrite(iFd, pfBuf, tSliceBytes, tOff);
+	}
+	dMean /= ((double)piSize[0] * piSize[1] * piSize[2]);
+	//-------------------------------------------------------------------
+	// After the flip newMin==fMin and newMax==fMax (values are symmetric),
+	// but mean changes.  Update amin/amax/amean in the MRC header.
+	float afStats[3] = {fMin, fMax, (float)dMean};
+	pwrite(iFd, afStats, sizeof(float)*3, 76);
+	close(iFd);
+	delete[] pfBuf;
+	printf("Flip volume intensity: done.\n\n");
+}
+
+//-----------------------------------------------------------------------------
+// Compute XZ and XY projection images for the volume that was streamed to
+// disk.  Reads one XZ slice at a time — peak extra RAM = one XZ slice plus
+// two small output images.
+//-----------------------------------------------------------------------------
+void CProcessThread::mSaveCentralSlicesStreaming(void)
+{
+	CInput* pInput = CInput::GetInstance();
+	int* piSize = m_pTomoStack->m_aiStkSize; // [volX, volZ, numY]
+	int iVolX = piSize[0], iVolZ = piSize[1], iNumY = piSize[2];
+	int iSlicePixels = iVolX * iVolZ;
+	size_t tSliceBytes = (size_t)iSlicePixels * sizeof(float);
+	size_t tDataOffset = 1024 + (size_t)32 * sizeof(float) * iNumY;
+	//-------------------------------------------------------------------
+	float* pfBuf    = new float[iSlicePixels];
+	float* pfSliceXZ = new float[iVolX * iVolZ]; // sum along Y axis
+	float* pfSliceXY = new float[iVolX * iNumY]; // sum along Z axis
+	memset(pfSliceXZ, 0, sizeof(float) * iVolX * iVolZ);
+	memset(pfSliceXY, 0, sizeof(float) * iVolX * iNumY);
+	//-------------------------------------------------------------------
+	int iFd = open(pInput->m_acOutMrcFile, O_RDONLY);
+	for(int y=0; y<iNumY; y++)
+	{	off_t tOff = (off_t)tDataOffset + (off_t)y * tSliceBytes;
+		pread(iFd, pfBuf, tSliceBytes, tOff);
+		// XZ projection: accumulate every pixel in the XZ plane.
+		for(int i=0; i<iSlicePixels; i++) pfSliceXZ[i] += pfBuf[i];
+		// XY projection: for each x, sum across all z rows.
+		for(int x=0; x<iVolX; x++)
+		{	float fSum = 0.0f;
+			for(int z=0; z<iVolZ; z++) fSum += pfBuf[z*iVolX + x];
+			pfSliceXY[y*iVolX + x] = fSum;
+		}
+	}
+	close(iFd);
+	delete[] pfBuf;
+	//-------------------------------------------------------------------
+	Util::CSaveTempMrc aSaveTempMrc;
+	char acMrcFile[256];
+	strcpy(acMrcFile, pInput->m_acOutMrcFile);
+	int aiSize[2] = {iVolX, iNumY};
+	aSaveTempMrc.SetFile(acMrcFile, "_projXY");
+	aSaveTempMrc.DoIt(pfSliceXY, 2, aiSize);
+	aiSize[1] = iVolZ;
+	aSaveTempMrc.SetFile(acMrcFile, "_projXZ");
+	aSaveTempMrc.DoIt(pfSliceXZ, 2, aiSize);
+	delete[] pfSliceXY;
+	delete[] pfSliceXZ;
+	printf("Done with computing orthogonal projections.\n\n");
 }

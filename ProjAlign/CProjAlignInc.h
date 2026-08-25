@@ -109,6 +109,33 @@ private:
 	GReproj m_aGReproj;
 };
 
+class GMnccXcf
+{
+public:
+	GMnccXcf(void);
+	~GMnccXcf(void);
+	void Clean(void);
+	void Setup(int iPixels);
+	void ApplyMask(float* gfImg, const float* gfMask, int iPixels);
+	void Square(const float* gfIn, float* gfOut, int iPixels);
+	void CrossMultiply
+	( const cufftComplex* gcA,
+	  const cufftComplex* gcB,
+	  cufftComplex* gcOut,
+	  int iCmpPixels
+	);
+	void MnccFinalize
+	( float* gfNum, const float* gfD1,
+	  float fD2, float fEps, int iPixels
+	);
+	float MaskedSumSq
+	( const float* gfImg, const float* gfMask, int iPixels );
+private:
+	float* m_gfPartial;
+	float* m_pfPartial;
+	int    m_iNumBlocks;
+};
+
 class GProjXcf
 {
 public:
@@ -146,12 +173,15 @@ public:
 	void Setup(int* piImgSize, int iVolZ);
 	void SetupXcf(float fPower, float fBFactor);
 	void DoIt(float* pfRef, float* pfImg, float fTilt);
+	void SetMask(float* pfBinnedMask);
 	void GetShift(float* pfShift);
 	float m_afShift[2];
 private:
 	void mGetCentral(float* pfImg, float* gfPadImg);
 	void mNormalize(float* gfPadImg);
 	void mCorrelate(void);
+	void mCorrelateMasked(void);
+	void mFindPeakMncc(void);
 	//--------------------
 	int m_aiImgSize[2];
 	int m_iVolZ;
@@ -162,12 +192,20 @@ private:
 	int m_aiCentSize[2];
 	int m_aiPadSize[2];
 	int m_iXcfBin;
+	bool m_bHasMask;
 	//------------
 	Util::GFFT2D m_fft2D;
+	Util::GFFT2D m_fft2DInv;
 	GProjXcf m_projXcf;
+	GMnccXcf m_aMncc;
 	float* m_gfPadRef;
 	float* m_gfPadImg;
 	float* m_gfPadBuf;
+	float* m_gfPadMask;
+	cufftComplex* m_gfCmpMask;
+	float* m_gfPadRef2;
+	float* m_gfPadD1;
+	float* m_pfMnccImg;
 };
 
 class CProjAlignMain
@@ -192,6 +230,7 @@ private:
 	float mMeasure(int iIter);
 	void mCalcBinning(void);
 	void mBinStack(void);
+	void mLoadMask(void);
 	void mRemoveSpikes(MrcUtil::CTomoStack* pTomoStack);
 	void mCalcReproj(int iProj);
 	void mCorrectProj(int iProj);

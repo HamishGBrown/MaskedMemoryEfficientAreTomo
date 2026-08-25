@@ -1,7 +1,9 @@
 #include "CProjAlignInc.h"
 #include "../CInput.h"
+#include <Mrcfile/CMrcFileInc.h>
 #include <memory.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include <Util/Util_Time.h>
 
@@ -75,6 +77,7 @@ void CProjAlignMain::Setup
 	cudaMallocHost(&m_pfReproj, sizeof(float) * iPixels);
 	//---------------------------------------------------
 	m_centralXcf.Setup(m_pBinStack->m_aiStkSize, m_iVolZ);
+	mLoadMask();
 	//----------------------------------------------------
 	bool bPadded = true;
 	m_corrProj.Setup(pTomoStack->m_aiStkSize, !bPadded,
@@ -223,4 +226,96 @@ void CProjAlignMain::mCorrectProj(int iProj)
 	bool bPadded = true;
 	float* pfBinProj = m_pBinStack->GetFrame(iProj);
 	m_corrProj.GetProj(pfBinProj, m_pBinStack->m_aiStkSize, !bPadded);
+}
+
+//-------------------------------------------------------------------
+// Load the optional -MaskFile MRC and bin it to match the binned
+// projection stack size, then pass to CCentralXcf::SetMask().
+// Supports MRC modes: 0 (int8), 1 (int16), 2 (float32), 6 (uint16).
+//-------------------------------------------------------------------
+void CProjAlignMain::mLoadMask(void)
+{
+	CInput* pInput = CInput::GetInstance();
+	if(strlen(pInput->m_acMaskFile) == 0) return;
+	//----------------------------------------------
+	Mrc::CLoadMrc aLoadMrc;
+	if(!aLoadMrc.OpenFile(pInput->m_acMaskFile))
+	{	fprintf(stderr, "Error: cannot open mask file %s\n",
+		   pInput->m_acMaskFile);
+		exit(1);
+	}
+	int iMode  = aLoadMrc.m_pLoadMain->GetMode();
+	int iFullX = aLoadMrc.m_pLoadMain->GetSizeX();
+	int iFullY = aLoadMrc.m_pLoadMain->GetSizeY();
+	int iFullPix = iFullX * iFullY;
+	//-------------------------------------------
+	int iBytesPerPix;
+	switch(iMode)
+	{	case 0:  iBytesPerPix = 1; break;  // int8
+		case 1:  iBytesPerPix = 2; break;  // int16
+		case 2:  iBytesPerPix = 4; break;  // float32
+		case 6:  iBytesPerPix = 2; break;  // uint16
+		default: iBytesPerPix = 4; break;
+	}
+	void* pvRaw = new char[iFullPix * iBytesPerPix];
+	aLoadMrc.m_pLoadImg->DoIt(0, pvRaw);
+	aLoadMrc.CloseFile();
+	//-------------------
+	// Convert raw pixels to float.
+	float* pfFull = new float[iFullPix];
+	switch(iMode)
+	{	case 0:
+		{	signed char* p = (signed char*)pvRaw;
+			for(int i=0; i<iFullPix; i++) pfFull[i] = (float)p[i];
+			break;
+		}
+		case 1:
+		{	short* p = (short*)pvRaw;
+			for(int i=0; i<iFullPix; i++) pfFull[i] = (float)p[i];
+			break;
+		}
+		case 2:
+			memcpy(pfFull, pvRaw, iFullPix * sizeof(float));
+			break;
+		case 6:
+		{	unsigned short* p = (unsigned short*)pvRaw;
+			for(int i=0; i<iFullPix; i++) pfFull[i] = (float)p[i];
+			break;
+		}
+		default:
+			memcpy(pfFull, pvRaw, iFullPix * sizeof(float));
+	}
+	delete[] (char*)pvRaw;
+	//------------------------
+	// Box-filter bin to match m_pBinStack size.
+	int iOutX  = m_pBinStack->m_aiStkSize[0];
+	int iOutY  = m_pBinStack->m_aiStkSize[1];
+	int iBinX  = iFullX / iOutX;  if(iBinX < 1) iBinX = 1;
+	int iBinY  = iFullY / iOutY;  if(iBinY < 1) iBinY = 1;
+	float fInvBin = 1.0f / (iBinX * iBinY);
+	//--------------------------------------
+	float* pfBinned = new float[iOutX * iOutY];
+	memset(pfBinned, 0, iOutX * iOutY * sizeof(float));
+	for(int oy=0; oy<iOutY; oy++)
+	{	for(int dy=0; dy<iBinY; dy++)
+		{	int sy = oy * iBinY + dy;
+			if(sy >= iFullY) continue;
+			float* pfRow = pfFull + sy * iFullX;
+			float* pfOut = pfBinned + oy * iOutX;
+			for(int ox=0; ox<iOutX; ox++)
+			{	float fSum = 0.0f;
+				for(int dx=0; dx<iBinX; dx++)
+				{	int sx = ox * iBinX + dx;
+					if(sx < iFullX) fSum += pfRow[sx];
+				}
+				pfOut[ox] += fSum * fInvBin;
+			}
+		}
+	}
+	delete[] pfFull;
+	//---
+	m_centralXcf.SetMask(pfBinned);
+	printf("Mask loaded: %s, binned %dx%d → %dx%d.\n",
+	   pInput->m_acMaskFile, iFullX, iFullY, iOutX, iOutY);
+	delete[] pfBinned;
 }

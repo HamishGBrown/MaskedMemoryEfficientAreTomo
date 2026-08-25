@@ -41,6 +41,8 @@ private:
 	void mSaveCentralSlices(void);
 	void mSaveAlignment(void);
 	void mSaveStack(void);
+	void mFlipIntStreaming(void);
+	void mSaveCentralSlicesStreaming(void);
 	//--------------------
 	MrcUtil::CTomoStack* m_pTomoStack;
 	MrcUtil::CAlignParam* m_pAlignParam;

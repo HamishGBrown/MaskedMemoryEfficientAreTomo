@@ -35,10 +35,26 @@ static __device__ float mGBilinear
 	return f2;
 }
 
+//-------------------------------------------------------------------
+// Cheap 32-bit integer hash (Wellons "triple32", public domain).
+// Replaces next = (next * 7) % iWinPixels, an LCG with a non-prime
+// modulus (31^2) and small multiplier: adjacent pixels (seeds
+// differing by 1) sampled offsets differing by a constant step,
+// producing a deterministic sawtooth ramp instead of noise.
+//-------------------------------------------------------------------
+static __device__ unsigned int mGHash(unsigned int x)
+{
+	x ^= x >> 17;  x *= 0xed5ad4bbu;
+	x ^= x >> 11;  x *= 0xac4c1b51u;
+	x ^= x >> 15;  x *= 0x31848babu;
+	x ^= x >> 14;
+	return x;
+}
+
 static __device__ float mGRandom
-(	float afXY[2], 
-	int iPadX, 
-	int iSizeY, 
+(	float afXY[2],
+	int iPadX,
+	int iSizeY,
 	float* gfImg
 )
 {	int x = (int)fabsf(afXY[0]);
@@ -48,17 +64,17 @@ static __device__ float mGRandom
 	//---------------------------------
 	int iWin = 31;
 	int iWinPixels = iWin * iWin;
-	unsigned int next = y * iPadX + x;
+	unsigned int seed = y * iPadX + x;
 	for(int k=0; k<iWinPixels; k++)
-	{	next = (next * 7) % iWinPixels;
-		int iX = next % iWin - iWin / 2 + x;
+	{	unsigned int next = mGHash(seed + k) % iWinPixels;
+		int iX = (next % iWin) - iWin / 2 + x;
 		if(iX < 0 || iX >= gridDim.x) continue;
-		int iY = next / iWin - iWin / 2 + y;
+		int iY = (next / iWin) - iWin / 2 + y;
 		if(iY < 0 || iY >= iSizeY) continue;
 		return gfImg[iY * iPadX + iX];
 	}
 	//------------------------------------
-	return gfImg[iSizeY / 2 * iPadX + gridDim.x / 2];		
+	return gfImg[iSizeY / 2 * iPadX + gridDim.x / 2];
 }
 
 static __global__ void mGStretch

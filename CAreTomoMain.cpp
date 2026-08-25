@@ -12,6 +12,7 @@ static MrcUtil::CTomoStack* s_pTomoStack = 0L;
 bool mCheckLoad(void);
 bool mCheckSave(char* pcMrcFile);
 bool mCheckGPUs(void);
+bool mCheckMask(void);
 bool mLoadAlignment(void);
 
 int main(int argc, char* argv[])
@@ -36,7 +37,8 @@ int main(int argc, char* argv[])
 	bool bLoad = mCheckLoad();
 	bool bSave = mCheckSave(pInput->m_acOutMrcFile);
 	bool bGpu = mCheckGPUs();
-	if(!bLoad || !bSave || !bGpu) return 1;
+	bool bMask = mCheckMask();
+	if(!bLoad || !bSave || !bGpu || !bMask) return 1;
 	//-----------------
 	Util_Time aTimer;
 	aTimer.Measure();
@@ -68,6 +70,22 @@ bool mCheckLoad(void)
 		return false;
 	} 	
 	//-----------------
+	return true;
+}
+
+bool mCheckMask(void)
+{
+	CInput* pInput = CInput::GetInstance();
+	if(strlen(pInput->m_acMaskFile) == 0) return true;
+	//-----------------
+	Mrc::CLoadMrc aLoadMrc;
+	bool bLoad = aLoadMrc.OpenFile(pInput->m_acMaskFile);
+	if(!bLoad)
+	{	fprintf(stderr, "Error: unable to open mask file\n");
+		fprintf(stderr, "       %s\n\n", pInput->m_acMaskFile);
+		return false;
+	}
+	aLoadMrc.CloseFile();
 	return true;
 }
 

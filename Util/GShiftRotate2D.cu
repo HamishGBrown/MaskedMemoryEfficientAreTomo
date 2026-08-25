@@ -26,6 +26,24 @@ static __device__ void mGCalcInXY(int y, int iInImgX, float afXY[2])
         afXY[1] = afXY[1] + (giInSize[1] - 1.0f) * 0.5f - gfShift[1];
 }
 
+//-------------------------------------------------------------------
+// Cheap 32-bit integer hash (Wellons "triple32", public domain).
+// Used in place of the previous next = (next * 7) % iWinPixels
+// LCG: that recurrence has modulus 31^2 (not prime) and multiplier 7,
+// so consecutive seeds (adjacent pixels differ by seed+1) produced
+// outputs differing by a constant step, i.e. a deterministic sawtooth
+// ramp rather than noise, visible as periodic/sinusoidal streaking
+// in the randomly-filled border regions after rotation.
+//-------------------------------------------------------------------
+static __device__ unsigned int mGHash(unsigned int x)
+{
+	x ^= x >> 17;  x *= 0xed5ad4bbu;
+	x ^= x >> 11;  x *= 0xac4c1b51u;
+	x ^= x >> 15;  x *= 0x31848babu;
+	x ^= x >> 14;
+	return x;
+}
+
 static __device__ float mGRandom(int x, int y, int iInImgX, float* gfInImg)
 {
 	if(x < 0) x = -x;
@@ -35,9 +53,9 @@ static __device__ float mGRandom(int x, int y, int iInImgX, float* gfInImg)
 	//------------------------------------------------
 	int iWin = 31;
 	int iWinPixels = iWin * iWin;
-	unsigned int next = y * giInSize[0] + x;
+	unsigned int seed = y * giInSize[0] + x;
 	for(int k=0; k<iWinPixels; k++)
-	{	next = (next * 7) % iWinPixels;
+	{	unsigned int next = mGHash(seed + k) % iWinPixels;
 		int ix = (next % iWin) - iWin / 2 + x;
 		if(ix < 0 || ix >= iInImgX) continue;
 		int iy = (next / iWin) - iWin / 2 + y;

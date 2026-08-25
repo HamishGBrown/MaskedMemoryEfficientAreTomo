@@ -28,6 +28,7 @@ CInput::CInput(void)
 	strcpy(m_acAlnFileTag, "-AlnFile");
 	strcpy(m_acAngFileTag, "-AngFile");
 	strcpy(m_acRoiFileTag, "-RoiFile");
+	strcpy(m_acMaskFileTag, "-MaskFile");
 	strcpy(m_acTmpFileTag, "-TmpFile");
 	strcpy(m_acLogFileTag, "-LogFile");
 	strcpy(m_acTiltRangeTag, "-TiltRange");
@@ -53,6 +54,7 @@ CInput::CInput(void)
 	strcpy(m_acOutXFTag, "-OutXF");
 	strcpy(m_acAlignTag, "-Align");
 	strcpy(m_acCropVolTag, "-CropVol");
+	strcpy(m_acOutRoiTag, "-OutputROI");
 	strcpy(m_acOutImodTag, "-OutImod");
 	strcpy(m_acDarkTolTag, "-DarkTol");
 	strcpy(m_acBFactorTag, "-Bft");
@@ -89,6 +91,7 @@ CInput::CInput(void)
 	memset(m_afExtPhase, 0, sizeof(m_afExtPhase));
 	memset(m_aiNumPatches, 0, sizeof(m_aiNumPatches));
 	memset(m_aiCropVol, 0, sizeof(m_aiCropVol));
+	memset(m_aiOutRoi, 0, sizeof(m_aiOutRoi));
 }
 
 CInput::~CInput(void)
@@ -251,6 +254,15 @@ void CInput::ShowTags(void)
 	   "      y is the length along the tilt axis.\n"
 	   "   3. This option is only enabled when -RoiFile is enabled.\n\n");
 	//--------------------------------------------------------------------
+	printf("%-10s\n", m_acOutRoiTag);
+	printf("   1. Only reconstruct and write out this XY sub-region of\n"
+	   "      the tomogram: xmin xmax ymin ymax, given as 0-based pixel\n"
+	   "      coordinates in the output (binned) volume frame.\n"
+	   "   2. Intended for large montage tomograms where writing the\n"
+	   "      full volume is impractical. Recommended over -CropVol for\n"
+	   "      this purpose since it works with streamed reconstruction.\n"
+	   "   3. Default is unset, meaning the full tomogram is written.\n\n");
+	//--------------------------------------------------------------------
 	printf("%-10s\n", m_acBFactorTag);
 	printf("   1. B-factors for low-pass filter used in the cross\n"
 	   "      correlation. The first value is used for global\n"
@@ -272,6 +284,7 @@ void CInput::Parse(int argc, char* argv[])
 	memset(m_acAlnFile, 0, sizeof(m_acAlnFile));
 	memset(m_acAngFile, 0, sizeof(m_acAngFile));
 	memset(m_acRoiFile, 0, sizeof(m_acRoiFile));
+	memset(m_acMaskFile, 0, sizeof(m_acMaskFile));
 	memset(m_acTmpFile, 0, sizeof(m_acTmpFile));
 	memset(m_acLogFile, 0, sizeof(m_acLogFile));
 	//------------------------------------------
@@ -292,6 +305,9 @@ void CInput::Parse(int argc, char* argv[])
 	//-----------------------------------------
 	aParseArgs.FindVals(m_acRoiFileTag, aiRange);
 	aParseArgs.GetVal(aiRange[0], m_acRoiFile);
+	//-----------------------------------------
+	aParseArgs.FindVals(m_acMaskFileTag, aiRange);
+	aParseArgs.GetVal(aiRange[0], m_acMaskFile);
 	//-----------------------------------------
 	aParseArgs.FindVals(m_acTmpFileTag, aiRange);
 	aParseArgs.GetVal(aiRange[0], m_acTmpFile);
@@ -406,6 +422,10 @@ void CInput::Parse(int argc, char* argv[])
 	if(aiRange[1] > 2) aiRange[1] = 2;
 	aParseArgs.GetVals(aiRange, m_aiCropVol);
 	//---------------------------------------
+	aParseArgs.FindVals(m_acOutRoiTag, aiRange);
+	if(aiRange[1] > 4) aiRange[1] = 4;
+	aParseArgs.GetVals(aiRange, m_aiOutRoi);
+	//---------------------------------------
 	aParseArgs.FindVals(m_acOutImodTag, aiRange);
 	if(aiRange[1] > 1) aiRange[1] = 1;
 	aParseArgs.GetVals(aiRange, &m_iOutImod);
@@ -434,6 +454,7 @@ void CInput::mPrint(void)
 	printf("%-10s  %s\n", m_acAlnFileTag, m_acAlnFile);
 	printf("%-10s  %s\n", m_acAngFileTag, m_acAngFile);
 	printf("%-10s  %s\n", m_acRoiFileTag, m_acRoiFile);
+	printf("%-10s  %s\n", m_acMaskFileTag, m_acMaskFile);
 	printf("%-10s  %s\n", m_acTmpFileTag, m_acTmpFile);
 	printf("%-10s  %s\n", m_acLogFileTag, m_acLogFile);
 	printf("%-10s  %d\n", m_acAlignZTag, m_iAlignZ);
@@ -477,6 +498,8 @@ void CInput::mPrint(void)
 	printf("%-10s  %d\n", m_acAlignTag, m_iAlign);
 	printf("%-10s  %d  %d\n", m_acCropVolTag, m_aiCropVol[0],
 	   m_aiCropVol[1]);
+	printf("%-10s  %d  %d  %d  %d\n", m_acOutRoiTag, m_aiOutRoi[0],
+	   m_aiOutRoi[1], m_aiOutRoi[2], m_aiOutRoi[3]);
 	printf("%-10s  %d\n", m_acOutImodTag, m_iOutImod);
 	printf("%-10s  %.2f\n", m_acDarkTolTag, m_fDarkTol);
 	printf("%-10s  %.1f  %.1f\n", m_acBFactorTag,

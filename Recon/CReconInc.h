@@ -209,6 +209,7 @@ protected:
 	float* m_pfPadSinogram;
 	float* m_gfVolXZ;
 	float* m_pfVolXZ;
+	float* m_pfOutXZ;   // cropped-width staging buffer written to disk
 	//---------------
 	Util::CNextItem* m_pNextItem;
         int m_iGpuID;	
@@ -223,7 +224,10 @@ public:
           int iVolZ,
 	  float fRFactor,
           int* piGpuIDs,
-          int iNumGpus
+          int iNumGpus,
+	  char* pcOutMrcFile,
+	  float fPixelSize,
+	  int* piOutRoi = 0L   // xmin, xmax, ymin, ymax; 0L or all-zero = full volume
         );
 	CDoWbpRecon(void);
 	virtual ~CDoWbpRecon(void);
@@ -251,7 +255,10 @@ public:
 	  int iIterations,
 	  int iNumSubsets,
 	  int* piGpuIDs,
-	  int iNumGpus
+	  int iNumGpus,
+	  char* pcOutMrcFile,
+	  float fPixelSize,
+	  int* piOutRoi = 0L   // xmin, xmax, ymin, ymax; 0L or all-zero = full volume
 	);
 	CDoSartRecon(void);
 	virtual ~CDoSartRecon(void);
