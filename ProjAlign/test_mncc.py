@@ -4,12 +4,19 @@ Regression test for the masked normalised cross-correlation (MNCC)
 used in ProjAlign/CCentralXcf.cpp :: mCorrelateMasked / mFindPeakMncc.
 
 Tests the reference Python implementation of the MNCC algorithm against
-known shifts.  All algorithmic choices mirror the CUDA implementation:
+known shifts.  All algorithmic choices mirror the CUDA implementation
+(Padfield 2012, masked NCC, eq. 21, single-mask case: ref fully valid,
+G is the mask on img):
 
-  num(t)  = IFFT( conj(FFT(ref))  x FFT(img*G) )
-  d1(t)   = IFFT( conj(FFT(ref^2)) x FFT(G)    )
-  d2      = sum( img^2 * G )                        [scalar]
+  c(t)    = IFFT( conj(FFT(ref))   x FFT(G)     )
+  num(t)  = IFFT( conj(FFT(ref))   x FFT(img*G) ) - c(t) * Simg/Sg
+  d1(t)   = IFFT( conj(FFT(ref^2)) x FFT(G)     ) - c(t)^2 / Sg
+  d2      = sum(img^2 * G) - Simg^2 / Sg             [scalar]
   MNCC(t) = num(t) / sqrt( |d1(t)| * d2 + eps )
+
+where Sg = sum(G) and Simg = sum(img*G). These are the local-mean
+correction cross terms; without them the metric is biased whenever
+ref/img have non-zero local mean under the (shifted) mask footprint.
 
 Peak location uses parabolic sub-pixel refinement with wrap-around
 neighbours (matching the fix in mFindPeakMncc).
@@ -45,6 +52,8 @@ def mncc_map(ref, img, mask, eps_scale=1e-6):
     mncc : 2-D float array, same shape as inputs.
     """
     img_masked = img * mask
+    sum_g    = float(np.sum(mask))
+    sum_imgg = float(np.sum(img * mask))
     d2 = float(np.sum(img ** 2 * mask))
 
     F_ref  = np.fft.rfft2(ref)
@@ -54,6 +63,13 @@ def mncc_map(ref, img, mask, eps_scale=1e-6):
 
     num = np.fft.irfft2(np.conj(F_ref)  * F_img,  s=ref.shape)
     d1  = np.fft.irfft2(np.conj(F_ref2) * F_mask, s=ref.shape)
+    c   = np.fft.irfft2(np.conj(F_ref)  * F_mask, s=ref.shape)
+
+    if sum_g > 1e-6:
+        num = num - c * (sum_imgg / sum_g)
+        d1  = d1 - (c ** 2) / sum_g
+        d2  = d2 - (sum_imgg ** 2) / sum_g
+    d2 = max(d2, 0.0)
 
     eps = eps_scale * d2 if d2 > 0.0 else 1e-10
     return num / np.sqrt(np.abs(d1) * d2 + eps)

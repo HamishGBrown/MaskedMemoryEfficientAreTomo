@@ -83,6 +83,49 @@ static __global__ void mGMaskedSumSq(
 	if(tid == 0) gfPartial[blockIdx.x] = s_data[0];
 }
 
+//------------------------------------------------------
+// Parallel reduction: sum of gfImg[i] * gfMask[i] (unsquared).
+// Called before ApplyMask so gfImg is still unmasked.
+//------------------------------------------------------
+static __global__ void mGMaskedSum(
+	const float* gfImg,
+	const float* gfMask,
+	float* gfPartial,
+	int iPixels)
+{
+	extern __shared__ float s_data[];
+	int tid = threadIdx.x;
+	int i   = blockIdx.x * blockDim.x + tid;
+	float v = (i < iPixels) ? (gfImg[i] * gfMask[i]) : 0.0f;
+	s_data[tid] = v;
+	__syncthreads();
+	for(int s = blockDim.x >> 1; s > 0; s >>= 1)
+	{	if(tid < s) s_data[tid] += s_data[tid + s];
+		__syncthreads();
+	}
+	if(tid == 0) gfPartial[blockIdx.x] = s_data[0];
+}
+
+//------------------------------------------------------
+// Subtract the local-mean cross terms (Padfield masked NCC, eq. 21),
+// using the precomputed correlate(ref, mask) map gfC:
+//   gfNum[i] -= gfC[i] * fNumFactor      (fNumFactor = sum(img*G)/sum(G))
+//   gfD1[i]  -= gfC[i]^2 * fInvSumG      (fInvSumG   = 1/sum(G))
+//------------------------------------------------------
+static __global__ void mGCorrectMaps(
+	float* gfNum,
+	float* gfD1,
+	const float* gfC,
+	float fNumFactor, float fInvSumG,
+	int iPixels)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if(i >= iPixels) return;
+	float c = gfC[i];
+	gfNum[i] -= c * fNumFactor;
+	gfD1[i]  -= c * c * fInvSumG;
+}
+
 //----------------------------------------------------------------------
 
 GMnccXcf::GMnccXcf(void)
@@ -158,4 +201,28 @@ float GMnccXcf::MaskedSumSq(const float* gfImg, const float* gfMask, int iPixels
 	double dSum = 0.0;
 	for(int i=0; i<iNumBlocks; i++) dSum += m_pfPartial[i];
 	return (float)dSum;
+}
+
+float GMnccXcf::MaskedSum(const float* gfImg, const float* gfMask, int iPixels)
+{
+	int iBlockSize = 256;
+	int iNumBlocks = (iPixels + iBlockSize - 1) / iBlockSize;
+	if(iNumBlocks > m_iNumBlocks) iNumBlocks = m_iNumBlocks;
+	size_t tShared = iBlockSize * sizeof(float);
+	mGMaskedSum<<<iNumBlocks, iBlockSize, tShared>>>(
+		gfImg, gfMask, m_gfPartial, iPixels);
+	cudaMemcpy(m_pfPartial, m_gfPartial,
+		iNumBlocks * sizeof(float), cudaMemcpyDefault);
+	//----------------------------------
+	double dSum = 0.0;
+	for(int i=0; i<iNumBlocks; i++) dSum += m_pfPartial[i];
+	return (float)dSum;
+}
+
+void GMnccXcf::CorrectMaps(
+	float* gfNum, float* gfD1, const float* gfC,
+	float fNumFactor, float fInvSumG, int iPixels)
+{
+	dim3 blk(256), grd((iPixels + 255) / 256);
+	mGCorrectMaps<<<grd, blk>>>(gfNum, gfD1, gfC, fNumFactor, fInvSumG, iPixels);
 }

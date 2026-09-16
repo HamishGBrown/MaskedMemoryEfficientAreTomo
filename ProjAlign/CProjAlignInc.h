@@ -130,6 +130,12 @@ public:
 	);
 	float MaskedSumSq
 	( const float* gfImg, const float* gfMask, int iPixels );
+	float MaskedSum
+	( const float* gfImg, const float* gfMask, int iPixels );
+	void CorrectMaps
+	( float* gfNum, float* gfD1, const float* gfC,
+	  float fNumFactor, float fInvSumG, int iPixels
+	);
 private:
 	float* m_gfPartial;
 	float* m_pfPartial;
@@ -193,6 +199,7 @@ private:
 	int m_aiPadSize[2];
 	int m_iXcfBin;
 	bool m_bHasMask;
+	float m_fSumG;
 	//------------
 	Util::GFFT2D m_fft2D;
 	Util::GFFT2D m_fft2DInv;
@@ -205,6 +212,7 @@ private:
 	cufftComplex* m_gfCmpMask;
 	float* m_gfPadRef2;
 	float* m_gfPadD1;
+	float* m_gfPadC;
 	float* m_pfMnccImg;
 };
 
