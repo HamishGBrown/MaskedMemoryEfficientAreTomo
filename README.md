@@ -5,10 +5,13 @@
 This is a fork of [czimaginginstitute/AreTomo2](https://github.com/czimaginginstitute/AreTomo2)
 (branched from upstream commit `01e7219`), adding masked projection alignment and
 memory-efficient reconstruction. It was developed to make montage tomography more
-workable since 1 TB RAM jobs never run on my cluster and contaminants, FIB 
-curtaining and lamella edges are often less avoidable and require masking but might
-be more useful to a general tomography audience with the current RAM inflation crisis
-:D.
+workable since:
+- 1 TB RAM jobs never run on my cluster  
+- Contaminants, FIB curtaining, lamella edges etc. are often less avoidable in montage tomography
+    and require masking 
+
+The code might be more useful to a general tomography audience with a penchant for dirty grids and 
+less budget to ride out the current RAM inflation crisis :D.
 
 Key changes relative to upstream:
 
